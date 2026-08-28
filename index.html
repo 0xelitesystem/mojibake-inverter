@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mojibake Inverter - recover text mangled by an encoding mistake</title>
+<meta name="description" content="Paste text mangled by an encoding mistake. Recovers the original exactly, reports the candidate codec set, names the byte positions that cannot be recovered, and shows why strict Python cp1252 refuses five bytes the browser handles.">
+<link rel="canonical" href="https://0xelitesystem.github.io/mojibake-inverter/">
+<meta property="og:title" content="Mojibake Inverter">
+<meta property="og:description" content="Recover text mangled by an encoding mistake. Exact recovery, an honest candidate set, and the five bytes strict Python cp1252 refuses.">
+<meta property="og:url" content="https://0xelitesystem.github.io/mojibake-inverter/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Mojibake Inverter","applicationCategory":"DeveloperApplication","operatingSystem":"Any (browser)","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"url":"https://0xelitesystem.github.io/mojibake-inverter/","author":{"@type":"Person","name":"0xelitesystem","url":"https://elitesystem.ai"}}
+</script>
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0a0a0a; --bg-deep:#050505; --surface:#111110; --surface-2:#161614;
+  --ink:#e8e8e3; --ink-soft:#a8a8a3; --muted:#6e6e68; --rule:#1f1f1d;
+  --rule-2:#2a2a27; --accent:#d4ff3a; --accent-2:#ffb454; --on-accent:#0a0a0a;
+  --code-bg:#111110; --ok:#7ddc7d; --warn:#ffb454; --err:#ff6450; --info:#6fd3e0;
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#e8ebef; --bg-deep:#f4f5f8; --surface:#dee2e8; --surface-2:#d3d7df;
+  --ink:#0a0a0a; --ink-soft:#2a2a27; --muted:#6e6e68; --rule:#c8cdd5;
+  --rule-2:#aab0ba; --accent:#2d6b00; --accent-2:#8a4d00; --on-accent:#ffffff;
+  --code-bg:#dee2e8; --ok:#1a5c2e; --warn:#8a4d00; --err:#a82d14; --info:#0f5c60;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --bg:#e8ebef; --bg-deep:#f4f5f8; --surface:#dee2e8; --surface-2:#d3d7df;
+    --ink:#0a0a0a; --ink-soft:#2a2a27; --muted:#6e6e68; --rule:#c8cdd5;
+    --rule-2:#aab0ba; --accent:#2d6b00; --accent-2:#8a4d00; --on-accent:#ffffff;
+    --code-bg:#dee2e8; --ok:#1a5c2e; --warn:#8a4d00; --err:#a82d14; --info:#0f5c60;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+.wrap{max-width:980px;margin:0 auto;padding:24px 16px 64px}
+header.top{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;justify-content:space-between;border-bottom:1px solid var(--rule);padding-bottom:16px;margin-bottom:8px}
+h1{font-size:26px;line-height:1.25;margin:0 0 6px}
+.tag{color:var(--ink-soft);margin:0;max-width:62ch}
+h2{font-size:19px;margin:34px 0 8px;padding-top:14px;border-top:1px solid var(--rule)}
+h3{font-size:15px;margin:18px 0 6px;letter-spacing:.02em;text-transform:uppercase;color:var(--ink-soft)}
+p{margin:8px 0}
+a{color:var(--accent)}
+a:hover{color:var(--ink)}
+button,select,input,textarea{font-family:inherit;font-size:15px}
+button{
+  background:var(--surface-2); color:var(--ink); border:1px solid var(--rule-2);
+  border-radius:6px; padding:8px 13px; cursor:pointer;
+}
+button:hover{border-color:var(--accent);color:var(--ink)}
+button:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:700}
+textarea{
+  width:100%; min-height:120px; background:var(--code-bg); color:var(--ink);
+  border:1px solid var(--rule-2); border-radius:6px; padding:11px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  font-size:14px; line-height:1.55; resize:vertical;
+}
+select{background:var(--surface-2);color:var(--ink);border:1px solid var(--rule-2);border-radius:6px;padding:7px 9px}
+label{color:var(--ink-soft);font-size:14px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px;margin:12px 0}
+.card.hi{border-color:var(--accent)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:13.5px}
+pre{
+  background:var(--code-bg);border:1px solid var(--rule);border-radius:6px;
+  padding:11px;overflow-x:auto;margin:8px 0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;
+}
+pre.nowrap{white-space:pre;word-break:normal}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:.92em;background:var(--code-bg);border:1px solid var(--rule);border-radius:4px;padding:1px 4px}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--rule);border-radius:8px;margin:10px 0}
+table{border-collapse:collapse;width:100%;min-width:520px;font-size:14px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{background:var(--surface-2);color:var(--ink);font-weight:700;white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.k-ok{color:var(--ok)}
+.k-warn{color:var(--warn)}
+.k-err{color:var(--err)}
+.k-info{color:var(--info)}
+.soft{color:var(--ink-soft)}
+.msg{border-radius:6px;padding:10px 12px;margin:10px 0;border:1px solid var(--rule-2);background:var(--surface-2)}
+.msg.err{border-color:var(--err);color:var(--err)}
+.msg.warn{border-color:var(--warn);color:var(--warn)}
+.msg.ok{border-color:var(--ok);color:var(--ok)}
+.pill{display:inline-block;border:1px solid var(--rule-2);border-radius:999px;padding:2px 9px;font-size:12.5px;color:var(--ink-soft);margin:2px 4px 2px 0;white-space:nowrap}
+.pill.on{border-color:var(--accent);color:var(--ink)}
+ul,ol{margin:8px 0;padding-left:22px}
+li{margin:5px 0}
+footer{border-top:1px solid var(--rule);margin-top:40px;padding-top:16px;color:var(--ink-soft);font-size:14px}
+footer a{margin-right:4px}
+.sep{color:var(--ink-soft);margin:0 6px}
+.big{font-size:17px}
+.stat{display:inline-block;min-width:82px;margin:0 14px 8px 0}
+.stat b{display:block;font-size:22px;color:var(--accent);font-variant-numeric:tabular-nums}
+.stat span{font-size:12.5px;color:var(--ink-soft)}
+@media (max-width:520px){
+  h1{font-size:22px}
+  .wrap{padding:16px 12px 48px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div>
+    <h1>Mojibake Inverter</h1>
+    <p class="tag">Paste text that an encoding mistake mangled. This recovers the original exactly, tells you the full set of codecs that could have caused the damage, and names the positions that cannot be recovered at all. Everything runs in this tab.</p>
+  </div>
+  <button id="themeBtn" type="button" aria-live="polite">Light theme</button>
+</header>
+
+<section id="repair">
+<h2>1. Repair</h2>
+<p>Mojibake happens when bytes written as UTF-8 get read back with a legacy single-byte codec. The damage is a pure byte-for-byte substitution, so it inverts exactly: map each character back to its byte under a candidate codec, then require the byte run to be valid UTF-8. Codecs that survive that filter are ranked by a plausibility score.</p>
+
+<label for="input">Mangled text</label>
+<textarea id="input" spellcheck="false" placeholder="Paste the garbled text here. Try one of the samples below."></textarea>
+
+<div class="row">
+  <button class="primary" id="runBtn" type="button">Repair</button>
+  <button id="clearBtn" type="button">Clear</button>
+  <label for="passes">Passes</label>
+  <select id="passes">
+    <option value="1">1</option>
+    <option value="3" selected>up to 3</option>
+    <option value="5">up to 5</option>
+  </select>
+</div>
+<div class="row" id="samples"></div>
+
+<div id="repairOut" aria-live="polite"></div>
+</section>
+
+<section id="python">
+<h2>2. Two failures, two steps: the Python asymmetry</h2>
+<p>WHATWG <code>windows-1252</code> maps all 256 byte values. Python's strict <code>cp1252</code> refuses five of them. The closing curly quote <code>U+201D</code> is <code>e2 80 9d</code> in UTF-8, and <code>0x9d</code> is one of those five, so a sentence with quoted speech breaks the standard server-side one-liner while this page recovers it exactly.</p>
+<p class="soft">There are two distinct failures at two different steps, and they raise different exceptions. Pick which text to trace:</p>
+<div class="row" id="pySamples"></div>
+<div id="pyOut" aria-live="polite"></div>
+</section>
+
+<section id="alias">
+<h2>3. The latin1 alias trap</h2>
+<p>There is no true ISO-8859-1 decoder in any browser. The Encoding Standard folds every ISO-8859-1 label onto <code>windows-1252</code>, so an implementer who lists <code>latin1</code> and <code>iso-8859-1</code> as two separate candidates has silently tested <code>windows-1252</code> twice and has never tested true ISO-8859-1 damage at all. This tool hand-builds ISO-8859-1 as an identity map, byte <em>n</em> to code point <em>n</em>, and runs it as a real candidate.</p>
+<div id="aliasOut"></div>
+</section>
+
+<section id="inventory">
+<h2>4. Decoder inventory, built at runtime</h2>
+<p>No encoding tables ship in this file. Every map below is read out of this browser's own <code>TextDecoder</code> at page load, one byte at a time, and the ISO-8859-1 row is generated arithmetically. Counts are what this run measured.</p>
+<div id="invOut"></div>
+</section>
+
+<section id="selftest">
+<h2>5. Self-test, run in this browser</h2>
+<p>A grid of original strings is damaged with several codecs, then fed back through the inverter. The numbers below are produced by that run, not quoted from anywhere.</p>
+<div class="row"><button id="stBtn" type="button">Re-run the grid</button></div>
+<div id="stOut" aria-live="polite"></div>
+</section>
+
+<section id="limits">
+<h2>6. What this does not promise</h2>
+<ul>
+  <li><strong>It does not promise to name the codec pair.</strong> Many legacy codecs agree on the byte ranges that ordinary accented text uses, so several of them invert the same damage to the same plaintext. When more than one codec survives, the page says so and lists all of them. The self-test above reports how often the surviving codec was unique on that grid.</li>
+  <li><strong>It cannot recover characters the first decode already destroyed.</strong> If a byte hit a hole in the damaging codec, the decoder wrote <code>U+FFFD</code> and the original byte is gone. Those positions are listed as unrecoverable, not guessed. The text either side of a hole is still inverted and returned, with the hole left exactly as it arrived.</li>
+  <li><strong>The valid-UTF-8 filter alone is not enough.</strong> Wrong codecs routinely produce byte runs that are perfectly valid UTF-8 and complete nonsense. That is why the plausibility scorer exists, and why its penalty breakdown is shown per candidate rather than hidden behind a single number.</li>
+  <li><strong>Ties are broken by a declared prevalence order</strong>, not by a measurement: windows-1252, then true ISO-8859-1, then ISO-8859-15, then the windows-125x family, then the rest. That order is a stated assumption about what actually breaks in the wild. It only ever reorders candidates that already scored identically, and the full set stays visible.</li>
+  <li><strong>Text is only inspected, never sent.</strong> There is no network call in this file.</li>
+</ul>
+</section>
+
+<section id="prior">
+<h2>7. Prior art and method</h2>
+<p><strong>ftfy</strong> is the well-known Python library for this job and it is very good. The difference here is scope, not quality: nothing to install, it runs on a paste, it reports the whole candidate set rather than one answer, it names the unrecoverable positions, and it handles the five bytes that strict Python <code>cp1252</code> refuses outright. If you can run Python and you want a batch fix inside a pipeline, use ftfy.</p>
+<p>Behaviour here was reimplemented from the published Encoding Standard and measured empirically in this browser. No code is reproduced from any other project.</p>
+<p class="soft">This tool is independent and unaffiliated with ftfy and its maintainers, the Python Software Foundation, the WHATWG, and Microsoft. Product and codec names are used only to identify the behaviour being measured.</p>
+</section>
+
+<section id="related">
+<h2>8. Related</h2>
+<ul>
+  <li><a href="https://github.com/0xelitesystem/unicode-character-inspector">unicode-character-inspector</a> - the natural next step once the text is recovered: what each code point actually is.</li>
+  <li><a href="https://github.com/0xelitesystem/character-encoding-utf8-basics-reference">character-encoding-utf8-basics-reference</a> - why UTF-8 looks the way it does.</li>
+  <li><a href="https://github.com/0xelitesystem/unicode-and-normalization-reference">unicode-and-normalization-reference</a> - NFC, NFD, and why a combining acute is two bytes.</li>
+</ul>
+</section>
+
+<footer>
+<a href="https://elitesystem.ai">elitesystem.ai</a><span class="sep">|</span><a href="https://github.com/0xelitesystem/mojibake-inverter">source</a><span class="sep">|</span><a href="https://0xelitesystem.github.io/">catalog</a>
+</footer>
+</div>
+<script>
+(function(){
+"use strict";
+
+/* ---------- theme ---------- */
+var root = document.documentElement, tbtn = document.getElementById('themeBtn');
+function stored(){ try { return localStorage.getItem('mojibake-inverter-theme'); } catch(e){ return null; } }
+function save(v){ try { localStorage.setItem('mojibake-inverter-theme', v); } catch(e){} }
+function effective(){
+  var a = root.getAttribute('data-theme');
+  if (a === 'light' || a === 'dark') return a;
+  try { if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) return 'light'; } catch(e){}
+  return 'dark';
+}
+function paintBtn(){ tbtn.textContent = effective() === 'dark' ? 'Light theme' : 'Dark theme'; }
+var s0 = stored();
+if (s0 === 'light' || s0 === 'dark') root.setAttribute('data-theme', s0);
+paintBtn();
+tbtn.addEventListener('click', function(){
+  var next = effective() === 'dark' ? 'light' : 'dark';
+  root.setAttribute('data-theme', next); save(next); paintBtn();
+});
+
+/* ---------- small helpers ---------- */
+function esc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function hex2(n){ var h = n.toString(16); return h.length < 2 ? '0' + h : h; }
+function U(cp){ var h = cp.toString(16).toUpperCase(); while (h.length < 4) h = '0' + h; return 'U+' + h; }
+function el(id){ return document.getElementById(id); }
+function chars(s){ return Array.from(s); }
+function cpList(s, max){
+  var a = chars(s), out = [], n = Math.min(a.length, max || 40);
+  for (var i = 0; i < n; i++) out.push(U(a[i].codePointAt(0)));
+  if (a.length > n) out.push('... +' + (a.length - n) + ' more');
+  return out.join(' ');
+}
+function bytesHex(b){ var o = []; for (var i = 0; i < b.length; i++) o.push(hex2(b[i])); return o.join(' '); }
+function pct(a, b){ return b ? (100 * a / b).toFixed(1) + '%' : '0%'; }
+
+/* ---------- codec construction, entirely at runtime ---------- */
+/* The Encoding Standard's legacy single-byte table. Labels only; every byte
+   map below is read out of this browser's TextDecoder, nothing is shipped. */
+var LABELS = ['IBM866','ISO-8859-2','ISO-8859-3','ISO-8859-4','ISO-8859-5','ISO-8859-6',
+  'ISO-8859-7','ISO-8859-8','ISO-8859-8-I','ISO-8859-10','ISO-8859-13','ISO-8859-14',
+  'ISO-8859-15','ISO-8859-16','KOI8-R','KOI8-U','macintosh','windows-874','windows-1250',
+  'windows-1251','windows-1252','windows-1253','windows-1254','windows-1255','windows-1256',
+  'windows-1257','windows-1258','x-mac-cyrillic'];
+
+/* Labels a naive grid would include and that this browser refuses outright. */
+var DOS_LABELS = ['cp437','ibm437','cp850','ibm850'];
+
+/* Labels that all collapse onto one encoding. The trap. */
+var ALIAS_PROBES = ['latin1','iso-8859-1','ISO-8859-1','l1','cp819','iso_8859-1:1987',
+  'cp1252','windows-1252','ascii','us-ascii'];
+
+var UTF8_FATAL = new TextDecoder('utf-8', { fatal: true });
+var ENC8 = new TextEncoder();
+
+function readMap(label){
+  var d = new TextDecoder(label);
+  var cps = new Array(256), repl = 0, buf = new Uint8Array(1);
+  for (var i = 0; i < 256; i++){
+    buf[0] = i;
+    var cp = d.decode(buf).codePointAt(0);
+    cps[i] = cp;
+    if (cp === 0xFFFD) repl++;
+  }
+  return { canonical: d.encoding, cps: cps, repl: repl, distinct: new Set(cps).size };
+}
+
+var BUILT = [], FAILED = [], DUPS = [], CODECS = [];
+(function buildAll(){
+  var byFp = new Map();
+  for (var i = 0; i < LABELS.length; i++){
+    var label = LABELS[i], m;
+    try { m = readMap(label); }
+    catch (e){ FAILED.push({ label: label, error: e.name }); continue; }
+    var rec = { label: label, canonical: m.canonical, cps: m.cps, repl: m.repl,
+                distinct: m.distinct, handBuilt: false, dupOf: null };
+    BUILT.push(rec);
+    var fp = m.cps.join(',');
+    if (byFp.has(fp)){ rec.dupOf = byFp.get(fp); DUPS.push(rec); }
+    else { byFp.set(fp, m.canonical); CODECS.push(rec); }
+  }
+  /* True ISO-8859-1, hand-built: byte n is code point n. No browser ships this. */
+  var id = new Array(256);
+  for (var b = 0; b < 256; b++) id[b] = b;
+  var latin1 = { label: 'ISO-8859-1 (built here)', canonical: 'iso-8859-1-true', cps: id,
+                 repl: 0, distinct: 256, handBuilt: true, dupOf: null };
+  BUILT.push(latin1);
+  CODECS.push(latin1);
+})();
+
+var DOS_RESULT = DOS_LABELS.map(function(l){
+  try { return { label: l, result: new TextDecoder(l).encoding, threw: false }; }
+  catch (e){ return { label: l, result: e.name, threw: true }; }
+});
+var ALIAS_RESULT = ALIAS_PROBES.map(function(l){
+  try { return { label: l, result: new TextDecoder(l).encoding, threw: false }; }
+  catch (e){ return { label: l, result: e.name, threw: true }; }
+});
+
+function byName(n){ for (var i = 0; i < CODECS.length; i++) if (CODECS[i].canonical === n) return CODECS[i]; return null; }
+function rev(c){
+  if (!c._rev){
+    var m = new Map();
+    for (var i = 255; i >= 0; i--) m.set(c.cps[i], i);
+    c._rev = m;
+  }
+  return c._rev;
+}
+var W1252 = byName('windows-1252');
+var LATIN1 = byName('iso-8859-1-true');
+
+/* Bytes whose windows-1252 code point is a C1 control. These are exactly the
+   byte values strict Python cp1252 refuses. Computed, not listed. */
+var C1_BYTES = (function(){
+  var out = [];
+  for (var b = 0; b < 256; b++){ var cp = W1252.cps[b]; if (cp >= 0x80 && cp <= 0x9F) out.push(b); }
+  return out;
+})();
+/* Byte values where true ISO-8859-1 and WHATWG windows-1252 disagree. */
+var LATIN1_DIFF = (function(){
+  var out = [];
+  for (var b = 0; b < 256; b++) if (W1252.cps[b] !== b) out.push(b);
+  return out;
+})();
+
+/* ---------- inversion ---------- */
+function invert(text, codec){
+  var a = chars(text);
+  if (a.length === 0) return { ok: false, reason: 'empty', bad: [] };
+  var r = rev(codec), arr = new Uint8Array(a.length), bad = [];
+  for (var i = 0; i < a.length; i++){
+    var cp = a[i].codePointAt(0);
+    if (cp === 0xFFFD){ bad.push({ i: i, cp: cp, why: 'already a replacement character' }); continue; }
+    var b = r.get(cp);
+    if (b === undefined){ bad.push({ i: i, cp: cp, why: 'no byte maps to it in this codec' }); continue; }
+    arr[i] = b;
+  }
+  if (bad.length) return { ok: false, reason: 'unmappable', bad: bad };
+  var out;
+  try { out = UTF8_FATAL.decode(arr); }
+  catch (e){ return { ok: false, reason: 'not valid UTF-8', bad: [] }; }
+  return { ok: true, text: out, bytes: arr };
+}
+
+/* ---------- plausibility scorer ---------- */
+function scriptOf(cp){
+  if ((cp >= 0x41 && cp <= 0x5A) || (cp >= 0x61 && cp <= 0x7A) ||
+      (cp >= 0xC0 && cp <= 0x24F) || (cp >= 0x1E00 && cp <= 0x1EFF)) return 'Latin';
+  if (cp >= 0x370 && cp <= 0x3FF) return 'Greek';
+  if (cp >= 0x400 && cp <= 0x52F) return 'Cyrillic';
+  if (cp >= 0x590 && cp <= 0x5FF) return 'Hebrew';
+  if (cp >= 0x600 && cp <= 0x6FF) return 'Arabic';
+  if (cp >= 0xE00 && cp <= 0xE7F) return 'Thai';
+  return null;
+}
+function isCombining(cp){
+  return (cp >= 0x300 && cp <= 0x36F) || (cp >= 0x1AB0 && cp <= 0x1AFF) ||
+         (cp >= 0x1DC0 && cp <= 0x1DFF) || (cp >= 0x20D0 && cp <= 0x20F0) ||
+         (cp >= 0xFE20 && cp <= 0xFE2F);
+}
+function isLetter(cp){ return scriptOf(cp) !== null; }
+function isUpper(ch){ var l = ch.toLowerCase(); return l !== ch; }
+
+function scoreText(text){
+  var a = chars(text), pen = {}, total = 0;
+  function add(k, v){ pen[k] = (pen[k] || 0) + v; total += v; }
+  var prevScript = null, scripts = new Set();
+  for (var i = 0; i < a.length; i++){
+    var ch = a[i], cp = ch.codePointAt(0);
+    if (cp === 0xFFFD) add('replacement character', 12);
+    else if ((cp < 0x20 && cp !== 9 && cp !== 10 && cp !== 13) || cp === 0x7F) add('C0 control', 10);
+    else if (cp >= 0x80 && cp <= 0x9F) add('C1 control', 10);
+    else if ((cp >= 0xFDD0 && cp <= 0xFDEF) || (cp & 0xFFFE) === 0xFFFE) add('noncharacter', 10);
+    else if ((cp >= 0xE000 && cp <= 0xF8FF) || (cp >= 0xF0000 && cp <= 0xFFFFD) ||
+             (cp >= 0x100000 && cp <= 0x10FFFD)) add('private use', 8);
+    if (isCombining(cp)){
+      var prevCp = i > 0 ? a[i-1].codePointAt(0) : -1;
+      if (!(isLetter(prevCp) || isCombining(prevCp))) add('lone combining mark', 6);
+      else {
+        var pair = String.fromCodePoint(prevCp) + ch;
+        if (pair.normalize('NFC').length === pair.length) add('combining mark that does not compose', 5);
+      }
+    }
+    if (cp > 0x7F && isLetter(cp) && isUpper(ch)){
+      var p = i > 0 ? a[i-1] : '', n = i + 1 < a.length ? a[i+1] : '';
+      var pLow = p && isLetter(p.codePointAt(0)) && !isUpper(p);
+      var nLow = n && isLetter(n.codePointAt(0)) && !isUpper(n);
+      if (pLow && nLow) add('capital inside a lowercase word', 3);
+    }
+    var sc = scriptOf(cp);
+    if (sc){
+      scripts.add(sc);
+      if (prevScript && prevScript !== sc) add('script switch mid-word', 4);
+      prevScript = sc;
+    } else if (cp === 0x20 || cp === 0x0A || cp === 0x09) prevScript = null;
+  }
+  if (scripts.size > 1) add('more than one script', 3 * (scripts.size - 1));
+  return { penalty: total, breakdown: pen, scripts: Array.from(scripts), len: a.length };
+}
+
+var PRIOR = ['windows-1252','iso-8859-1-true','iso-8859-15','windows-1251','windows-1250',
+  'iso-8859-2','windows-1254','windows-1256','windows-1253','windows-1255','windows-1257',
+  'windows-1258','koi8-r','koi8-u','iso-8859-5','iso-8859-7','iso-8859-4','iso-8859-13',
+  'iso-8859-16','iso-8859-3','iso-8859-6','iso-8859-8','iso-8859-10','iso-8859-14',
+  'windows-874','ibm866','macintosh','x-mac-cyrillic'];
+function priorRank(n){ var i = PRIOR.indexOf(n); return i < 0 ? 999 : i; }
+
+function analyse(text){
+  var surv = [], dead = [];
+  for (var i = 0; i < CODECS.length; i++){
+    var c = CODECS[i], r = invert(text, c);
+    if (r.ok) surv.push({ codec: c, text: r.text, bytes: r.bytes, score: scoreText(r.text) });
+    else dead.push({ codec: c, reason: r.reason, bad: r.bad });
+  }
+  surv.sort(function(a, b){
+    return (a.score.penalty - b.score.penalty) ||
+           (priorRank(a.codec.canonical) - priorRank(b.codec.canonical));
+  });
+  var plains = new Set(surv.map(function(s){ return s.text; }));
+  return { surv: surv, dead: dead, plains: plains };
+}
+
+/* Positions no candidate codec can turn back into a byte. */
+function deadPositions(text){
+  var a = chars(text), out = [];
+  for (var i = 0; i < a.length; i++){
+    var cp = a[i].codePointAt(0), any = false;
+    if (cp !== 0xFFFD){
+      for (var j = 0; j < CODECS.length; j++){ if (rev(CODECS[j]).has(cp)){ any = true; break; } }
+    }
+    if (!any) out.push({ i: i, cp: cp, ch: a[i] });
+  }
+  return out;
+}
+
+function repair(text, maxPasses){
+  var cur = text, log = [], seen = new Set([text]);
+  for (var p = 0; p < maxPasses; p++){
+    var a = analyse(cur);
+    if (!a.surv.length){ log.push({ pass: p + 1, stopped: 'no codec survives the UTF-8 filter', analysis: a, from: cur }); break; }
+    var top = a.surv[0];
+    if (top.text === cur || seen.has(top.text)){ log.push({ pass: p + 1, stopped: 'a further pass would not change the text', analysis: a, from: cur }); break; }
+    seen.add(top.text);
+    log.push({ pass: p + 1, from: cur, to: top.text, analysis: a });
+    cur = top.text;
+  }
+  return { text: cur, log: log };
+}
+
+/* Text that contains a position no codec can invert is still repairable on
+   either side of that position. Split at the holes, invert each run on its own,
+   and put the holes back untouched rather than guessing what was there. */
+function repairAround(text, maxPasses, lost){
+  var a = chars(text), hole = {};
+  for (var h = 0; h < lost.length; h++) hole[lost[h].i] = true;
+  var parts = [], cur = '';
+  for (var i = 0; i < a.length; i++){
+    if (hole[i]){
+      if (cur){ parts.push({ hole: false, from: cur }); cur = ''; }
+      parts.push({ hole: true, from: a[i] });
+    } else cur += a[i];
+  }
+  if (cur) parts.push({ hole: false, from: cur });
+  var out = '', changed = false;
+  for (var k = 0; k < parts.length; k++){
+    if (parts[k].hole){ parts[k].to = parts[k].from; out += parts[k].from; continue; }
+    var r = repair(parts[k].from, maxPasses);
+    parts[k].to = r.text;
+    if (r.text !== parts[k].from) changed = true;
+    out += r.text;
+  }
+  return { text: out, parts: parts, changed: changed };
+}
+
+/* ---------- damage generator, used only for samples and the self-test ----------
+   Test strings are written as escape sequences so this file stays pure ASCII. */
+function damage(original, codecName){
+  var c = byName(codecName);
+  if (!c) return null;
+  var bytes = ENC8.encode(original), out = '', lost = 0;
+  for (var i = 0; i < bytes.length; i++){
+    var cp = c.cps[bytes[i]];
+    if (cp === 0xFFFD) lost++;
+    out += String.fromCodePoint(cp);
+  }
+  return { text: out, lost: lost, bytes: bytes };
+}
+
+var SAMPLES = [
+  { name: 'Curly quotes via windows-1252',
+    make: function(){ return damage('He said \u201Chello\u201D to the team.', 'windows-1252').text; } },
+  { name: 'Accents via windows-1252',
+    make: function(){ return damage('caf\u00E9, na\u00EFve, r\u00E9sum\u00E9, jalape\u00F1o', 'windows-1252').text; } },
+  { name: 'German via windows-1250',
+    make: function(){ return damage('Z\u00FCrich, Stra\u00DFe, K\u00F6ln', 'windows-1250').text; } },
+  { name: 'NFD combining acute',
+    make: function(){ return damage('cafe\u0301 latte', 'windows-1252').text; } },
+  { name: 'Damaged twice',
+    make: function(){ return damage(damage('Fran\u00E7ois \u2014 d\u00E9j\u00E0 vu', 'windows-1252').text, 'windows-1252').text; } },
+  { name: 'A byte already lost',
+    make: function(){
+      var m = damage('caf\u00E9 \u201Chi\u201D', 'windows-1252').text, a = chars(m);
+      a[1] = '\uFFFD';
+      return a.join('');
+    } }
+];
+
+/* ---------- rendering: repair ---------- */
+function scoreCell(score){
+  var keys = Object.keys(score.breakdown);
+  if (!keys.length) return '<span class="k-ok">0</span> <span class="soft">no penalties</span>';
+  var parts = keys.map(function(k){ return esc(k) + ' ' + score.breakdown[k]; });
+  return '<span class="k-warn">' + score.penalty + '</span> <span class="soft">' + parts.join('; ') + '</span>';
+}
+
+function renderRepair(){
+  var box = el('repairOut');
+  var raw = el('input').value;
+  if (raw.length === 0){
+    box.innerHTML = '<div class="msg err" role="alert"><strong>Nothing to repair.</strong> The box is empty. Paste the mangled text, or load one of the samples above.</div>';
+    return;
+  }
+  var isAscii = true;
+  for (var i = 0; i < raw.length; i++) if (raw.charCodeAt(i) > 0x7E){ isAscii = false; break; }
+  var html = '';
+  if (isAscii){
+    html += '<div class="msg warn" role="alert"><strong>This text is pure ASCII.</strong> Mojibake always leaves non-ASCII characters behind, so there is nothing here to invert. Every candidate below will fail the UTF-8 filter, which is the correct answer, not a bug.</div>';
+  }
+
+  var passes = parseInt(el('passes').value, 10) || 1;
+  var lost = deadPositions(raw);
+  if (lost.length){
+    var li = lost.slice(0, 24).map(function(p){
+      return '<li>index ' + p.i + ', ' + esc(U(p.cp)) +
+        (p.cp === 0xFFFD ? ' - a replacement character. The byte behind it was discarded by the decode that damaged this text and cannot be recovered by anything.'
+                         : ' - no byte in any of the ' + CODECS.length + ' candidate codecs maps to this character, so it did not come from a single-byte decode.') + '</li>';
+    }).join('');
+    html += '<div class="msg err"><strong>' + lost.length + ' position' + (lost.length === 1 ? '' : 's') +
+      ' cannot be recovered.</strong><ul>' + li +
+      (lost.length > 24 ? '<li class="soft">... and ' + (lost.length - 24) + ' more</li>' : '') +
+      '</ul></div>';
+
+    var around = repairAround(raw, passes, lost);
+    if (around.changed){
+      html += '<div class="card hi"><h3>Recovered text, with the holes left in place</h3>' +
+        '<pre id="outText">' + esc(around.text) + '</pre>' +
+        '<div class="row"><button id="copyBtn" type="button">Copy</button>' +
+        '<span class="soft mono">' + chars(around.text).length + ' characters, ' +
+        lost.length + ' still unrecoverable</span></div>' +
+        '<p>A hole does not make the rest of the string unrecoverable. The text was split at the ' +
+        lost.length + ' position' + (lost.length === 1 ? '' : 's') +
+        ' above, each run either side was inverted on its own, and the holes were put back exactly as ' +
+        'they arrived. Nothing at those positions is guessed.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Run</th><th>As pasted</th><th>Recovered</th></tr></thead><tbody>';
+      for (var pi = 0; pi < around.parts.length; pi++){
+        var P = around.parts[pi];
+        html += '<tr><td>' + (P.hole ? '<span class="k-err">hole</span>' : '<span class="soft">text</span>') +
+          '</td><td class="mono">' + esc(P.from) + '</td><td class="mono">' +
+          (P.hole ? '<span class="k-err">' + esc(P.to) + '</span>' : esc(P.to)) + '</td></tr>';
+      }
+      html += '</tbody></table></div></div>';
+      box.innerHTML = html;
+      wireCopy();
+      return;
+    }
+  }
+
+  var res = repair(raw, passes);
+  var applied = res.log.filter(function(l){ return l.to; });
+
+  if (!applied.length){
+    var first = res.log[0];
+    html += '<div class="msg err" role="alert"><strong>No repair found.</strong> ' +
+      (first ? esc(first.stopped || '') : 'Nothing survived.') +
+      '. Under every candidate codec the recovered byte run was either unmappable or not valid UTF-8. ' +
+      (lost.length
+        ? 'The ' + lost.length + ' position' + (lost.length === 1 ? '' : 's') +
+          ' listed above blocked every candidate, and the runs either side of ' +
+          (lost.length === 1 ? 'it' : 'them') + ' were already clean, so there was nothing left to invert.'
+        : 'That is what clean text looks like, and it is also what text that was damaged some other way looks like.') +
+      '</div>';
+    box.innerHTML = html + deadTable(res.log[0] ? res.log[0].analysis : analyse(raw));
+    return;
+  }
+
+  var last = applied[applied.length - 1].analysis;
+  var top = last.surv[0];
+  var codecNames = [];
+  var seenPlain = new Map();
+  for (var s = 0; s < last.surv.length; s++){
+    codecNames.push(last.surv[s].codec.canonical);
+    if (!seenPlain.has(last.surv[s].text)) seenPlain.set(last.surv[s].text, []);
+    seenPlain.get(last.surv[s].text).push(last.surv[s].codec.canonical);
+  }
+
+  html += '<div class="card hi"><h3>Recovered text</h3><pre id="outText">' + esc(res.text) + '</pre>' +
+    '<div class="row"><button id="copyBtn" type="button">Copy</button>' +
+    '<span class="soft mono">' + chars(res.text).length + ' characters, ' +
+    ENC8.encode(res.text).length + ' bytes as UTF-8</span></div>' +
+    '<p class="mono soft">' + esc(cpList(res.text, 32)) + '</p></div>';
+
+  html += '<div class="card"><h3>How sure the codec is</h3>';
+  var nCodec = new Set(codecNames).size, nPlain = seenPlain.size;
+  if (nCodec === 1){
+    html += '<p class="k-ok"><strong>One codec survives: ' + esc(codecNames[0]) + '.</strong> ' +
+      'On this input the damage is pinned to a single codec.</p>';
+  } else {
+    html += '<p class="k-warn"><strong>' + nCodec + ' codecs survive, producing ' + nPlain +
+      ' distinct plaintext' + (nPlain === 1 ? '' : 's') + '.</strong> ' +
+      (nPlain === 1
+        ? 'They all invert to the same text, so the recovery is certain even though the codec is not identifiable from this sample alone.'
+        : 'The text above is the highest-ranked candidate, not a proven answer. The alternatives are listed below.') + '</p>';
+  }
+  html += '<p class="soft">Candidate codecs: ';
+  var seenC = {};
+  for (var q = 0; q < codecNames.length; q++){
+    if (seenC[codecNames[q]]) continue;
+    seenC[codecNames[q]] = 1;
+    html += '<span class="pill' + (codecNames[q] === top.codec.canonical ? ' on' : '') + '">' + esc(codecNames[q]) + '</span>';
+  }
+  html += '</p></div>';
+
+  if (applied.length > 1 || res.log.length > 1){
+    html += '<div class="card"><h3>Passes</h3><div class="scroll"><table><thead><tr>' +
+      '<th>Pass</th><th>Result</th><th>Survivors</th></tr></thead><tbody>';
+    for (var p = 0; p < res.log.length; p++){
+      var L = res.log[p];
+      html += '<tr><td class="num">' + L.pass + '</td><td>' +
+        (L.to ? '<span class="mono">' + esc(L.to.slice(0, 90)) + (L.to.length > 90 ? '...' : '') + '</span>'
+              : '<span class="soft">stopped: ' + esc(L.stopped) + '</span>') +
+        '</td><td class="num">' + L.analysis.surv.length + '</td></tr>';
+    }
+    html += '</tbody></table></div><p class="soft">Text that has been damaged more than once inverts more than once. The loop stops when a further pass would change nothing or when nothing survives the UTF-8 filter.</p></div>';
+  }
+
+  html += '<div class="card"><h3>Candidate set, final pass</h3><div class="scroll"><table><thead><tr>' +
+    '<th>Rank</th><th>Codec</th><th>Recovered</th><th>Penalty and why</th></tr></thead><tbody>';
+  for (var r2 = 0; r2 < last.surv.length; r2++){
+    var c2 = last.surv[r2];
+    html += '<tr><td class="num">' + (r2 + 1) + '</td><td class="mono">' + esc(c2.codec.canonical) +
+      (c2.codec.handBuilt ? ' <span class="pill">built here</span>' : '') + '</td>' +
+      '<td class="mono">' + esc(c2.text.slice(0, 80)) + (c2.text.length > 80 ? '...' : '') + '</td>' +
+      '<td>' + scoreCell(c2.score) + '</td></tr>';
+  }
+  html += '</tbody></table></div><p class="soft">Lower penalty is better. Equal penalties are ordered by the declared prevalence list, which is an assumption, not a measurement.</p></div>';
+
+  html += deadTable(last);
+  box.innerHTML = html;
+  wireCopy();
+}
+
+function wireCopy(){
+  var cb = el('copyBtn');
+  if (!cb) return;
+  cb.addEventListener('click', function(){
+    var t = el('outText').textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(t).then(function(){ cb.textContent = 'Copied'; },
+        function(){ cb.textContent = 'Copy blocked'; });
+    } else { cb.textContent = 'Copy unavailable'; }
+  });
+}
+
+function deadTable(a){
+  var reasons = {};
+  for (var i = 0; i < a.dead.length; i++){
+    var k = a.dead[i].reason;
+    reasons[k] = (reasons[k] || 0) + 1;
+  }
+  var keys = Object.keys(reasons);
+  if (!keys.length) return '';
+  var rows = keys.map(function(k){
+    return '<tr><td>' + esc(k) + '</td><td class="num">' + reasons[k] + '</td></tr>';
+  }).join('');
+  return '<div class="card"><h3>Codecs ruled out</h3><div class="scroll"><table><thead><tr>' +
+    '<th>Reason</th><th>Codecs</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<p class="soft">Ruled out of ' + CODECS.length + ' candidates. "not valid UTF-8" is the filter doing the work: ' +
+    'the wrong codec almost always produces a byte run that UTF-8 rejects.</p></div>';
+}
+
+/* ---------- rendering: Python asymmetry ---------- */
+var PY_SAMPLES = [
+  { name: 'Quoted speech', text: 'He said \u201Chello\u201D to the team.' },
+  { name: 'NFD combining acute', text: 'cafe\u0301 latte' },
+  { name: 'Plain accents (Python is fine)', text: 'caf\u00E9, na\u00EFve, r\u00E9sum\u00E9' }
+];
+
+function renderPython(text){
+  var box = el('pyOut');
+  var bytes = ENC8.encode(text);
+  var refused = {};
+  for (var i = 0; i < C1_BYTES.length; i++) refused[C1_BYTES[i]] = true;
+
+  var firstByte = -1;
+  for (var b = 0; b < bytes.length; b++) if (refused[bytes[b]]){ firstByte = b; break; }
+
+  var moj = '';
+  for (var j = 0; j < bytes.length; j++) moj += String.fromCodePoint(W1252.cps[bytes[j]]);
+  var mArr = chars(moj), firstChar = -1;
+  for (var k = 0; k < mArr.length; k++){
+    var cp = mArr[k].codePointAt(0);
+    if (cp >= 0x80 && cp <= 0x9F){ firstChar = k; break; }
+  }
+  var back = invert(moj, W1252);
+  var exact = back.ok && back.text === text;
+
+  var html = '';
+  html += '<div class="card"><h3>The text, as bytes</h3>' +
+    '<pre>' + esc(text) + '</pre>' +
+    '<pre class="nowrap mono">' + esc(bytesHex(bytes)) + '</pre>' +
+    '<p class="soft mono">' + esc(cpList(text, 26)) + '</p></div>';
+
+  html += '<div class="card"><h3>Step A. Python reads the raw bytes</h3>' +
+    '<pre class="nowrap">raw.decode(\'cp1252\')</pre>';
+  if (firstByte >= 0){
+    html += '<pre class="k-err">UnicodeDecodeError: \'charmap\' codec can\'t decode byte 0x' +
+      hex2(bytes[firstByte]) + ' in position ' + firstByte + ': character maps to ' + esc('<undefined>') + '</pre>' +
+      '<p>Byte <code>0x' + hex2(bytes[firstByte]) + '</code> at offset ' + firstByte +
+      ' is one of the ' + C1_BYTES.length + ' byte values strict <code>cp1252</code> has no character for. ' +
+      'The read fails before any repair can start.</p>';
+  } else {
+    html += '<pre class="k-ok">no exception: every byte here has a cp1252 character</pre>' +
+      '<p>This text happens to avoid all ' + C1_BYTES.length + ' refused bytes, so step A succeeds. ' +
+      'That is the honest half of the story: the Python route is not always blocked, it is blocked by ' +
+      'a specific and very common set of characters.</p>';
+  }
+  html += '</div>';
+
+  html += '<div class="card"><h3>Step B. The browser reads the same bytes</h3>' +
+    '<pre class="nowrap">new TextDecoder(\'windows-1252\').decode(raw)</pre>' +
+    '<pre>' + esc(moj) + '</pre>' +
+    '<p class="soft mono">' + esc(cpList(moj, 26)) + '</p>' +
+    '<p>No exception, ever. WHATWG <code>windows-1252</code> assigns a code point to all 256 byte values, ' +
+    'so the mangled string always exists. This is the familiar garble.</p></div>';
+
+  html += '<div class="card"><h3>Step C. Python tries the canonical repair on that string</h3>' +
+    '<pre class="nowrap">mangled.encode(\'cp1252\').decode(\'utf-8\')</pre>';
+  if (firstChar >= 0){
+    var badCp = mArr[firstChar].codePointAt(0);
+    html += '<pre class="k-err">UnicodeEncodeError: \'charmap\' codec can\'t encode character \'\\x' +
+      hex2(badCp) + '\' in position ' + firstChar + ': character maps to ' + esc('<undefined>') + '</pre>' +
+      '<p><strong>Different exception, different step.</strong> Step A failed on a <em>byte</em> while decoding. ' +
+      'Step C fails on a <em>character</em> while encoding, because ' + esc(U(badCp)) +
+      ' is a C1 control that strict <code>cp1252</code> will not encode. Both failures are real and they are ' +
+      'not the same bug. A single-byte decode is one character per byte, so the two offsets coincide here, ' +
+      'but the exception classes do not.</p>';
+  } else {
+    html += '<pre class="k-ok">no exception: the mangled string contains no C1 control</pre>' +
+      '<p>With no refused byte in the input there is no C1 control in the mangled string, so the ' +
+      'Python one-liner works on this text.</p>';
+  }
+  html += '</div>';
+
+  html += '<div class="card"><h3>Step D. The browser inverts it</h3>' +
+    '<pre>' + esc(back.ok ? back.text : '(inversion failed: ' + back.reason + ')') + '</pre>' +
+    (exact
+      ? '<p class="k-ok"><strong>Recovered exactly.</strong> Compared to the original with <code>===</code>: identical, all ' +
+        chars(text).length + ' characters.</p>'
+      : '<p class="k-err">Round trip did not reproduce the original for this input.</p>') +
+    '</div>';
+
+  html += '<div class="card"><h3>The five bytes, enumerated here</h3>' +
+    '<p>Read out of this browser: the byte values whose <code>windows-1252</code> code point is a C1 control. ' +
+    'That set is exactly what strict Python <code>cp1252</code> refuses, at both steps.</p>' +
+    '<pre class="nowrap mono">' + C1_BYTES.map(function(b){ return '0x' + hex2(b) + ' -> ' + U(W1252.cps[b]); }).join('\n') + '</pre>' +
+    '<p class="soft">The exception text above uses the message templates CPython 3.14 emits for these cases. ' +
+    'The byte value, the character and the position in each message are computed here from the text you selected.</p></div>';
+
+  box.innerHTML = html;
+}
+
+/* ---------- rendering: alias trap ---------- */
+function renderAlias(){
+  var rows = ALIAS_RESULT.map(function(r){
+    var flag = r.threw ? '<span class="k-err">throws ' + esc(r.result) + '</span>'
+                       : '<span class="mono">' + esc(r.result) + '</span>';
+    return '<tr><td class="mono">' + esc(r.label) + '</td><td>' + flag + '</td></tr>';
+  }).join('');
+  var distinct = new Set(ALIAS_RESULT.filter(function(r){ return !r.threw; })
+    .map(function(r){ return r.result; }));
+  var agree = 0;
+  for (var b = 0x80; b <= 0x9F; b++) if (W1252.cps[b] === b) agree++;
+
+  var demoOrig = 'He said \u201Chi\u201D';
+  var d1 = damage(demoOrig, 'windows-1252').text;
+  var d2 = damage(demoOrig, 'iso-8859-1-true').text;
+
+  var html = '<div class="card"><h3>What this browser does with each label</h3><div class="scroll"><table><thead><tr>' +
+    '<th>Label passed to TextDecoder</th><th>Encoding you actually get</th></tr></thead><tbody>' + rows +
+    '</tbody></table></div><p class="k-warn"><strong>' + ALIAS_RESULT.length +
+    ' different labels, ' + distinct.size + ' distinct encoding' + (distinct.size === 1 ? '' : 's') +
+    '.</strong> Every ISO-8859-1 spelling resolves to <code>windows-1252</code>, and so does <code>ascii</code>.</p></div>';
+
+  html += '<div class="card"><h3>Why that matters: the maps are not the same</h3>' +
+    '<p>True ISO-8859-1 is the identity map, byte <em>n</em> to code point <em>n</em>. WHATWG ' +
+    '<code>windows-1252</code> replaces the C1 range with printable characters. Measured here: they disagree on ' +
+    '<strong>' + LATIN1_DIFF.length + ' of 256 byte values</strong>, all inside 0x80 to 0x9F, and agree on the ' +
+    'remaining ' + agree + ' bytes of that range.</p>' +
+    '<pre class="nowrap mono">byte  true ISO-8859-1      WHATWG windows-1252\n' +
+    [0x80, 0x91, 0x9c, 0x9d].map(function(b){
+      return '0x' + hex2(b) + '  ' + U(b) + '              ' + U(W1252.cps[b]) +
+             (W1252.cps[b] === b ? '   (same)' : '');
+    }).join('\n') + '</pre></div>';
+
+  html += '<div class="card"><h3>The same sentence, damaged two ways</h3>' +
+    '<p>Original: <code>' + esc(demoOrig) + '</code></p>' +
+    '<div class="scroll"><table><thead><tr><th>Damaging codec</th><th>Mangled text</th><th>Code points</th></tr></thead><tbody>' +
+    '<tr><td class="mono">windows-1252</td><td class="mono">' + esc(d1) + '</td><td class="mono soft">' + esc(cpList(d1, 12)) + '</td></tr>' +
+    '<tr><td class="mono">iso-8859-1 (built here)</td><td class="mono">' + esc(d2) + '</td><td class="mono soft">' + esc(cpList(d2, 12)) + '</td></tr>' +
+    '</tbody></table></div>' +
+    '<p>' + (d1 === d2
+      ? 'On this sample the two happen to agree.'
+      : 'Different strings. A tool that only ever asks the browser for "latin1" can never produce or detect the second row, because the browser silently hands it <code>windows-1252</code> for the second time.') +
+    '</p></div>';
+
+  el('aliasOut').innerHTML = html;
+}
+
+/* ---------- rendering: inventory ---------- */
+function renderInventory(){
+  var rows = BUILT.map(function(c){
+    var note = c.handBuilt ? '<span class="pill on">generated arithmetically</span>'
+             : c.dupOf ? '<span class="soft">identical map to ' + esc(c.dupOf) + '</span>'
+             : '';
+    return '<tr><td class="mono">' + esc(c.label) + '</td><td class="mono">' + esc(c.canonical) + '</td>' +
+      '<td class="num">' + c.distinct + '</td>' +
+      '<td class="num">' + (c.repl ? '<span class="k-warn">' + c.repl + '</span>' : '0') + '</td>' +
+      '<td>' + note + '</td></tr>';
+  }).join('');
+
+  var dosRows = DOS_RESULT.map(function(r){
+    return '<tr><td class="mono">' + esc(r.label) + '</td><td>' +
+      (r.threw ? '<span class="k-err">' + esc(r.result) + '</span>' : '<span class="mono">' + esc(r.result) + '</span>') +
+      '</td></tr>';
+  }).join('');
+  var threw = DOS_RESULT.filter(function(r){ return r.threw; }).length;
+
+  var probed = LABELS.length;
+  var html = '<div class="row">' +
+    '<span class="stat"><b>' + probed + '</b><span>labels probed</span></span>' +
+    '<span class="stat"><b>' + (BUILT.length - 1) + '</b><span>built</span></span>' +
+    '<span class="stat"><b>' + FAILED.length + '</b><span>refused</span></span>' +
+    '<span class="stat"><b>' + (CODECS.length - 1) + '</b><span>distinct maps</span></span>' +
+    '<span class="stat"><b>' + CODECS.length + '</b><span>candidates</span></span>' +
+    '</div>' +
+    '<p>' + (DUPS.length
+      ? DUPS.length + ' label' + (DUPS.length === 1 ? ' produced' : 's produced') +
+        ' a byte map identical to another and ' + (DUPS.length === 1 ? 'was' : 'were') +
+        ' folded, so a duplicate cannot masquerade as independent evidence. '
+      : '') +
+    'The hand-built ISO-8859-1 identity map is added on top, giving ' + CODECS.length + ' candidate codecs.</p>' +
+    '<div class="scroll"><table><thead><tr><th>Label</th><th>Canonical encoding</th>' +
+    '<th>Distinct code points</th><th>Bytes with no character</th><th>Note</th></tr></thead><tbody>' +
+    rows + '</tbody></table></div>' +
+    '<h3>Labels this browser refuses</h3>' +
+    '<p>A grid built from a list of "codepages" rather than from the Encoding Standard fails here. ' +
+    'Measured in this browser: ' + threw + ' of ' + DOS_RESULT.length + ' DOS codepage labels throw.</p>' +
+    '<div class="scroll"><table><thead><tr><th>Label</th><th>Result</th></tr></thead><tbody>' +
+    dosRows + '</tbody></table></div>' +
+    '<p class="soft">Shipping those would mean shipping hand-written tables, which is exactly what this file refuses to do. They are out of scope, and said so rather than faked.</p>';
+
+  el('invOut').innerHTML = html;
+}
+
+/* ---------- self-test ---------- */
+var ST_ORIGINALS = [
+  'He said \u201Chello\u201D',
+  'caf\u00E9',
+  'se\u00F1or',
+  'ni\u00F1o',
+  'na\u00EFve r\u00E9sum\u00E9',
+  'Z\u00FCrich stra\u00DFe',
+  '\u20AC50 \u2013 \u20AC60',
+  'Fran\u00E7ois \u2014 d\u00E9j\u00E0 vu',
+  'cafe\u0301 (NFD)',
+  'jalape\u00F1o \u2022 taco',
+  'Bj\u00F6rk \u00C5ngstr\u00F6m',
+  '\u201CQuoted\u201D and \u2018single\u2019',
+  'M\u00FCnchen, K\u00F6ln\u2026',
+  '3 \u00B5s \u00B1 0.5',
+  'r\u00F4le \u00E0 la carte',
+  'Portugu\u00EAs: informa\u00E7\u00E3o'
+];
+var ST_DAMAGE = ['windows-1252', 'windows-1250', 'iso-8859-15', 'iso-8859-1-true'];
+
+function runSelfTest(){
+  var t0 = (performance && performance.now) ? performance.now() : Date.now();
+  var cases = 0, present = 0, rank1 = 0, uniqCodec = 0, uniqPlain = 0, skipped = 0;
+  var rows = [];
+  for (var i = 0; i < ST_ORIGINALS.length; i++){
+    for (var j = 0; j < ST_DAMAGE.length; j++){
+      var orig = ST_ORIGINALS[i], dl = ST_DAMAGE[j];
+      var d = damage(orig, dl);
+      if (!d || d.lost){ skipped++; continue; }
+      cases++;
+      var a = analyse(d.text);
+      var top = a.surv.length ? a.surv[0] : null;
+      var hasExact = a.surv.some(function(s){ return s.text === orig; });
+      var codecSet = new Set(a.surv.map(function(s){ return s.codec.canonical; }));
+      if (hasExact) present++;
+      if (top && top.text === orig) rank1++;
+      if (codecSet.size === 1) uniqCodec++;
+      if (a.plains.size === 1) uniqPlain++;
+      rows.push({ orig: orig, dl: dl, surv: a.surv.length, codecs: codecSet.size,
+                  plains: a.plains.size, ok: !!(top && top.text === orig) });
+    }
+  }
+  var t1 = (performance && performance.now) ? performance.now() : Date.now();
+
+  var html = '<div class="row">' +
+    '<span class="stat"><b>' + cases + '</b><span>cases</span></span>' +
+    '<span class="stat"><b>' + present + '</b><span>original in the set</span></span>' +
+    '<span class="stat"><b>' + rank1 + '</b><span>original ranked first</span></span>' +
+    '<span class="stat"><b>' + uniqPlain + '</b><span>one plaintext</span></span>' +
+    '<span class="stat"><b>' + uniqCodec + '</b><span>one codec</span></span>' +
+    '</div>' +
+    '<p>' + ST_ORIGINALS.length + ' original strings damaged with ' + ST_DAMAGE.length +
+    ' codecs, then inverted against all ' + CODECS.length + ' candidates. Run took ' +
+    (t1 - t0).toFixed(0) + ' ms in this browser.</p>' +
+    '<ul>' +
+    '<li>Exact original present in the candidate set: <strong>' + present + ' of ' + cases + '</strong> (' + pct(present, cases) + ').</li>' +
+    '<li>Exact original ranked first by the scorer: <strong>' + rank1 + ' of ' + cases + '</strong> (' + pct(rank1, cases) + ').</li>' +
+    '<li>Only one plaintext survived at all: <strong>' + uniqPlain + ' of ' + cases + '</strong> (' + pct(uniqPlain, cases) +
+    '). In the rest, the filter alone leaves a genuine ambiguity and the scorer has to break it.</li>' +
+    '<li>Only one codec survived: <strong>' + uniqCodec + ' of ' + cases + '</strong> (' + pct(uniqCodec, cases) +
+    '). This is the number that kills the "we will name the codec pair" promise.</li>' +
+    (skipped ? '<li class="soft">' + skipped + ' combination' + (skipped === 1 ? '' : 's') + ' skipped: the damaging codec had a hole and the damage was lossy, so no tool could invert it.</li>' : '') +
+    '</ul>';
+
+  html += '<div class="scroll"><table><thead><tr><th>Original</th><th>Damaged with</th>' +
+    '<th>Survivors</th><th>Codecs</th><th>Plaintexts</th><th>Rank 1 correct</th></tr></thead><tbody>';
+  for (var r = 0; r < rows.length; r++){
+    var R = rows[r];
+    html += '<tr><td class="mono">' + esc(R.orig) + '</td><td class="mono">' + esc(R.dl) + '</td>' +
+      '<td class="num">' + R.surv + '</td><td class="num">' + R.codecs + '</td><td class="num">' + R.plains + '</td>' +
+      '<td>' + (R.ok ? '<span class="k-ok">yes</span>' : '<span class="k-err">no</span>') + '</td></tr>';
+  }
+  html += '</tbody></table></div>';
+  el('stOut').innerHTML = html;
+}
+
+/* ---------- wiring ---------- */
+(function wire(){
+  var sBox = el('samples');
+  sBox.innerHTML = '<span class="soft">Samples:</span>';
+  SAMPLES.forEach(function(s){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = s.name;
+    b.addEventListener('click', function(){ el('input').value = s.make(); renderRepair(); });
+    sBox.appendChild(b);
+  });
+
+  var pBox = el('pySamples');
+  PY_SAMPLES.forEach(function(s, idx){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = s.name;
+    b.addEventListener('click', function(){ renderPython(s.text); });
+    pBox.appendChild(b);
+    if (idx === 0) setTimeout(function(){ renderPython(s.text); }, 0);
+  });
+
+  el('runBtn').addEventListener('click', renderRepair);
+  el('clearBtn').addEventListener('click', function(){
+    el('input').value = '';
+    el('repairOut').innerHTML = '';
+    el('input').focus();
+  });
+  el('stBtn').addEventListener('click', runSelfTest);
+
+  renderAlias();
+  renderInventory();
+  runSelfTest();
+  el('input').value = SAMPLES[0].make();
+  renderRepair();
+})();
+
+})();
+</script>
+</body>
+</html>
